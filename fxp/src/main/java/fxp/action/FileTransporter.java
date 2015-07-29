@@ -297,7 +297,89 @@ public class FileTransporter {
 		
 	}
 
-	
+	public FXPResponse Transport2(String sourcePath,String sourceFilename,String destinationPath,String destinationFilename){
+		
+		FXPResponse response = new FXPResponse();
+		response.setId(this.getId(destinationFilename));
+		response.setActie(FileTransporter.STATUS_OK);
+		this.checkData(response);
+		
+		if(response.getStatus() == FileTransporter.STATUS_NOK){
+			return response;
+		}
+		
+		
+		
+		FTPClient ftp1 = new FTPClient();
+		FTPClient ftp2 = new FTPClient();
+		
+		try{
+			
+			ftp1.connect(this.destinationHost, this.destinationPort);
+			ftp2.connect(this.sourceHost, this.sourcePort);
+			
+			if(!ftp1.login(this.destinationUser, this.destinationPassword)){
+					System.out.println("ftp1 login false");
+			}
+			if(!ftp2.login(this.sourceUser, this.sourcePassword)){
+				System.out.println("ftp2 login false");
+			}
+				
+			ftp1.changeWorkingDirectory(destinationPath);
+			ftp2.changeWorkingDirectory(sourcePath);
+			
+			
+			ftp1.setFileType(FTPClient.BINARY_FILE_TYPE);
+			ftp2.setFileType(FTPClient.BINARY_FILE_TYPE);
+			
+			//ftp1.pasv();
+			//String reply = ftp1.getReplyString();;
+			
+			ftp1.enterRemotePassiveMode();
+			ftp2.port(ftp1.getRemoteAddress(), ftp2.getPassivePort());
+			
+			//ftp2.sendCommand("PORT " + this.getPorts(reply));
+			
+			
+			
+			if(ftp1.stor(destinationFilename) == 550){
+				response.setStatus(FileTransporter.STATUS_NOK);
+				response.setMessage("The user '" + this.destinationUser + "' has no rights to write on destination: " + this.destinationHost);
+			};
+			ftp2.retr(sourceFilename);
+			
+			
+			
+			//StorProcedure storPro = new StorProcedure(ftp1, "STOR " + destinationFilename);
+			//StorProcedure retrProdecure = new StorProcedure(ftp2, "RETR " + sourceFilename);
+			
+			/*Thread thread = new Thread(storPro);
+			Thread thread2 = new Thread(retrProdecure);
+			
+			thread.start();
+			thread2.start();*/
+			
+		}catch(IOException e){
+			e.printStackTrace();
+			response.setStatus(FileTransporter.STATUS_NOK);
+			response.setMessage("There was an error within an IO-action: " + e.getMessage() + ". INFO SOURCE Filename: " + sourceFilename + ". FilePath: " + sourcePath);
+		}finally{
+			try {
+				ftp1.disconnect();
+				ftp2.disconnect();
+			} catch (IOException e) {
+				e.printStackTrace();
+				response.setStatus(FileTransporter.STATUS_NOK);
+				response.setMessage("There was an error when closing de ftp-connection : " + e.getMessage() + ". INFO SOURCE Filename: " + sourceFilename + ". FilePath: " + sourcePath);
+				
+			}
+			
+		}
+		
+		response.setStatus(FileTransporter.STATUS_OK);
+		response.setMessage("The file " + sourceFilename + " has been copied as file " + destinationFilename + "on the destination " + this.destinationHost  );
+		return response;
+	}
 	
 	private FXPResponse checkData(FXPResponse response){
 		
