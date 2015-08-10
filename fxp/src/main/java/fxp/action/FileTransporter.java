@@ -1,9 +1,13 @@
 package fxp.action;
 
 
+
 import java.io.IOException;
+import java.net.SocketException;
 
 import org.apache.commons.net.ftp.FTPClient;
+import org.apache.commons.net.ftp.FTPFile;
+
 
 import fxp.response.FXPResponse;
 import fxp.thread.StorProcedure;
@@ -61,6 +65,8 @@ public class FileTransporter {
 		this.destinationUser = destinationUser;
 		this.sourcePassword = sourcePassword;
 		this.destinationPassword = destinationPassword;
+		
+		
 	}
 
 
@@ -217,61 +223,49 @@ public class FileTransporter {
 		if(response.getStatus() == FileTransporter.STATUS_NOK){
 			return response;
 		}
-	
 		
 		FTPClient ftp1 = new FTPClient();
 		FTPClient ftp2 = new FTPClient();
 		
 		try{
-		
-		ftp1.connect(this.destinationHost, this.destinationPort);
-		ftp2.connect(this.sourceHost, this.sourcePort);
-		
-		if(!ftp1.login(this.destinationUser, this.destinationPassword)){
-				System.out.println("ftp1 login false");
-		}
-		if(!ftp2.login(this.sourceUser, this.sourcePassword)){
-			System.out.println("ftp2 login false");
-		}
+			this.doFileCheck(sourcePath, sourceFilename,response);
+			if(response.getStatus() == FileTransporter.STATUS_NOK){
+				return response;
+				
+			}
+			ftp1.connect(this.destinationHost, this.destinationPort);
+			ftp2.connect(this.sourceHost, this.sourcePort);
 			
-		ftp1.changeWorkingDirectory(destinationPath);
-		ftp2.changeWorkingDirectory(sourcePath);
-		
-		ftp1.sendCommand("TYPE I");
-		ftp2.sendCommand("TYPE I");
-		
-		ftp1.sendCommand("PASV");
-		
-		String reply = ftp1.getReplyString();;
-		ftp2.sendCommand("PORT " + this.getPorts(reply));
-		
-		
-		StorProcedure storPro = new StorProcedure(ftp1, "STOR " + destinationFilename);
-		StorProcedure retrProdecure = new StorProcedure(ftp2, "RETR " + sourceFilename);
-		
-		/*if(ftp1.sendCommand("STOR " + destinationFilename) == 550){
-			response.setStatus(FileTransporter.STATUS_NOK);
-			response.setMessage("no rights");
-			throw new Exception();
-		};*/
-		
-		
-		//ftp2.sendCommand("RETR " + sourceFilename);
-		
-		Thread thread = new Thread(storPro);
-		Thread thread2 = new Thread(retrProdecure);
-		
-		thread.start();
-		thread2.start();
-		
-		thread.join();
-		thread2.join();
-		
-		
-		response.setStatus(FileTransporter.STATUS_OK);
-		response.setMessage("The file " + sourceFilename + " has been copied as file " + destinationFilename + "on the destination " + this.destinationHost  );
-		
-		
+			if(!ftp1.login(this.destinationUser, this.destinationPassword)){
+					System.out.println("ftp1 login false");
+			}
+			if(!ftp2.login(this.sourceUser, this.sourcePassword)){
+				System.out.println("ftp2 login false");
+			}
+				
+			ftp1.changeWorkingDirectory(destinationPath);
+			ftp2.changeWorkingDirectory(sourcePath);
+			ftp1.sendCommand("TYPE I");
+			ftp2.sendCommand("TYPE I");
+			ftp1.sendCommand("PASV");
+			
+			String reply = ftp1.getReplyString();;
+			ftp2.sendCommand("PORT " + this.getPorts(reply));
+			
+			StorProcedure storPro = new StorProcedure(ftp1, "STOR " + destinationFilename);
+			StorProcedure retrProdecure = new StorProcedure(ftp2, "RETR " + sourceFilename);
+			
+			Thread thread = new Thread(storPro);
+			Thread thread2 = new Thread(retrProdecure);
+			
+			thread.start();
+			thread2.start();
+			
+			thread.join();
+			thread2.join();
+			
+			response.setStatus(FileTransporter.STATUS_OK);
+			response.setMessage("The file " + sourceFilename + " has been copied as file " + destinationFilename + " on the destination " + this.destinationHost  );
 		}catch(IOException e){
 			e.printStackTrace();
 			response.setStatus(FileTransporter.STATUS_NOK);
@@ -291,15 +285,12 @@ public class FileTransporter {
 			}
 			
 		}
-		
-		return response;
-		
-		
+		return response;	
 	}
 
 	
 	
-	private FXPResponse checkData(FXPResponse response){
+	private void checkData(FXPResponse response){
 		
 		if((this.sourceHost.isEmpty() || this.destinationHost.isEmpty())||(this.sourceHost == "" || this.destinationHost == "")){
 			response.setStatus(FileTransporter.STATUS_NOK);
@@ -318,7 +309,56 @@ public class FileTransporter {
 		}
 		
 		
-		return response;
+		
+	}
+	
+	private void doFileCheck(String sourcePath,String sourceFilename, FXPResponse response) throws SocketException, IOException{
+		
+		FTPClient ftpClient = new FTPClient();	
+		try{
+		
+			ftpClient.connect(this.sourceHost, this.destinationPort);
+			ftpClient.login(this.sourceUser, this.sourcePassword);
+			
+			ftpClient.changeWorkingDirectory(sourcePath);
+			FTPFile[] files = ftpClient.listFiles(sourceFilename);
+			
+			if (files.length == 0){
+				response.setStatus(FileTransporter.STATUS_NOK);
+				response.setMessage("File does not exist");
+				
+			}else if (files[0].getSize() == 0){
+				response.setStatus(FileTransporter.STATUS_NOK);
+				response.setMessage("File is empty");
+				}	
+				
+		}finally{
+			ftpClient.disconnect();
+		}
+		
+	}
+	
+	public boolean checkFreeSpace(String destinationPath, int maxFilesOnLocation) throws SocketException, IOException{
+		
+		FTPClient ftpClient = new FTPClient();
+		boolean result = false;
+		try{
+			
+			ftpClient.connect(this.destinationHost, this.destinationPort);
+			ftpClient.login(this.destinationUser, this.destinationPassword);
+			
+			ftpClient.changeWorkingDirectory(destinationPath);
+			FTPFile[] files = ftpClient.listFiles();
+			
+			if (files.length < maxFilesOnLocation){
+				result = true;
+				
+			}
+		}finally{
+			ftpClient.disconnect();
+		}
+		
+		return result;
 	}
 	
 	private String getId(String sourceFile){

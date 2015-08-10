@@ -1,0 +1,8 @@
+
+*.class
+
+*.lst
+
+fxp/target/fxp-1.0.0.jar
+
+fxp/target/maven-archiver/pom.properties
