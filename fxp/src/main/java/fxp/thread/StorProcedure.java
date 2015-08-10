@@ -16,7 +16,7 @@ public class StorProcedure implements Runnable{
 	}
 
 	public void run() {
-		// TODO Auto-generated method stub	
+		
 		try {
 			ftpClient.sendCommand(command);
 		} catch (IOException e) {
