@@ -213,7 +213,7 @@ public class FileTransporter {
 	@param none
 	@return boolean true= file is copied, false=file is not copied 
 	@throws IOException - if the method can not do a command on the servers*/
-	public FXPResponse Transport(String sourcePath,String sourceFilename,String destinationPath,String destinationFilename){
+	public FXPResponse transport(String sourcePath,String sourceFilename,String destinationPath,String destinationFilename){
 		
 		FXPResponse response = new FXPResponse();
 		response.setId(this.getId(destinationFilename));
