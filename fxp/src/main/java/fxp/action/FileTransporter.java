@@ -244,8 +244,13 @@ public class FileTransporter {
 				System.out.println("ftp2 login false");
 			}
 
+			ftpCreateDirectoryTree(ftp1, destinationPath);
+			ftpCreateDirectoryTree(ftp2, sourcePath);
+
+			/*
 			ftp1.changeWorkingDirectory(destinationPath);
 			ftp2.changeWorkingDirectory(sourcePath);
+			*/
 			ftp1.sendCommand("TYPE I");
 			ftp2.sendCommand("TYPE I");
 			ftp1.sendCommand("PASV");
@@ -432,12 +437,37 @@ public class FileTransporter {
 
 	private String getId(String sourceFile){
 		int location = sourceFile.indexOf(".");
-		return sourceFile.substring(0, location);
+		return sourceFile.substring(0, (location == -1 ? sourceFile.length() - 1 : location));
 	}
 
 	private String getPorts(String reply){
 		int location = reply.indexOf('(');
 		int location2 = reply.indexOf(')');
 		return reply.substring(location+1, location2);
+	}
+
+	private static void ftpCreateDirectoryTree( FTPClient client, String dirTree ) throws IOException {
+
+		boolean dirExists = true;
+
+		//tokenize the string and attempt to change into each directory level.  If you cannot, then start creating.
+		String[] directories = dirTree.replaceFirst(client.printWorkingDirectory(), "").split("/");
+		for (String dir : directories ) {
+			if (dir != null && !dir.isEmpty()) {
+				if (!dir.isEmpty()) {
+					if (dirExists) {
+						dirExists = client.changeWorkingDirectory(dir);
+					}
+					if (!dirExists) {
+						if (!client.makeDirectory(dir)) {
+							throw new IOException("Unable to create remote directory '" + dir + "'.  error='" + client.getReplyString() + "'");
+						}
+						if (!client.changeWorkingDirectory(dir)) {
+							throw new IOException("Unable to change into newly created remote directory '" + dir + "'.  error='" + client.getReplyString() + "'");
+						}
+					}
+				}
+			}
+		}
 	}
 }
