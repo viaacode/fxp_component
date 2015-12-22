@@ -214,7 +214,7 @@ public class FileTransporter {
 	@param none
 	@return boolean true= file is copied, false=file is not copied 
 	@throws IOException - if the method can not do a command on the servers*/
-	public FXPResponse transport(String sourcePath,String sourceFilename,String destinationPath,String destinationFilename){
+	public FXPResponse transport(String sourcePath,String sourceFilename,String destinationPath,String destinationFilename,boolean move){
 
 		FXPResponse response = new FXPResponse();
 		response.setId(this.getId(destinationFilename));
@@ -269,6 +269,16 @@ public class FileTransporter {
 
 			thread.join();
 			thread2.join();
+
+
+			if (!this.filesizeEqual(sourcePath, sourceFilename, destinationPath, destinationFilename)) {
+				response.setMessage("Files weren't of the same size. Transfer failed.");
+				response.setStatus(STATUS_NOK);
+			} else {
+				if (move) {
+					this.deleteFile(sourcePath, sourceFilename);
+				}
+			}
 
 			response.setStatus(FileTransporter.STATUS_OK);
 			response.setMessage("The file " + sourceFilename + " has been copied as file " + destinationFilename + " on the destination " + this.destinationHost  );
@@ -444,6 +454,46 @@ public class FileTransporter {
 		int location = reply.indexOf('(');
 		int location2 = reply.indexOf(')');
 		return reply.substring(location+1, location2);
+	}
+
+	private boolean filesizeEqual(String sourcePath, String sourceFilename, String destinationPath, String destinationFilename) throws IOException {
+		FTPClient ftpClient1 = new FTPClient();
+		FTPClient ftpClient2 = new FTPClient();
+		try{
+
+			ftpClient1.connect(this.sourceHost, this.sourcePort);
+			ftpClient2.connect(this.destinationHost, this.destinationPort);
+
+			ftpClient1.login(this.sourceUser, this.sourcePassword);
+			ftpClient2.login(this.destinationUser, this.destinationPassword);
+
+			ftpClient1.changeWorkingDirectory(sourcePath);
+			ftpClient2.changeWorkingDirectory(destinationPath);
+
+
+			FTPFile[] files1 = ftpClient1.listFiles(sourceFilename);
+			FTPFile[] files2 = ftpClient2.listFiles(destinationFilename);
+
+			if (files1.length == 0 || files2.length == 0){
+				throw new IOException("Transfer failed. One of the files doesn't exist anymore.");
+
+			}else{
+				if (files1[0].getSize() == files2[0].getSize()) return true;
+			}
+			return false;
+
+		}finally{
+			ftpClient1.disconnect();
+			ftpClient2.disconnect();
+		}
+	}
+
+	private void deleteFile(String sourcePath, String sourceFilename) throws IOException {
+		FTPClient ftpClient = new FTPClient();
+		ftpClient.connect(this.sourceHost, this.sourcePort);
+		ftpClient.login(this.sourceUser, this.sourcePassword);
+		ftpClient.changeWorkingDirectory(sourcePath);
+		ftpClient.deleteFile(sourceFilename);
 	}
 
 	private static void ftpCreateDirectoryTree( FTPClient client, String dirTree ) throws IOException {
