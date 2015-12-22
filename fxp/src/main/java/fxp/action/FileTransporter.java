@@ -289,6 +289,8 @@ public class FileTransporter {
 		} catch (Exception e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
+			response.setStatus(FileTransporter.STATUS_NOK);
+			response.setMessage("There was an error within an IO-action: " + e.getMessage() + ". INFO SOURCE Filename: " + sourceFilename + ". FilePath: " + sourcePath);
 		}finally{
 			try {
 				ftp1.disconnect();
