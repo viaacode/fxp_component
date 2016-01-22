@@ -37,6 +37,9 @@ public class FileTransporter {
 	public static final String ACTIE = "FXP";
 	public static final String MOV_ACTIE= "MOV";
 
+	private static final class Lock { }
+	private final Object lock = new Lock();
+
 
 	/*
 	 * Empty constructor for FileTransporter
@@ -271,17 +274,39 @@ public class FileTransporter {
 			thread2.join();
 
 
+			int count = 0;
+			long previousSize = 0;
+			int identicalSizeCount = 0;
+			synchronized (lock) {
+				long[] filesizes = getFileSizes(sourcePath, sourceFilename, destinationPath, destinationFilename);
+
+				while (!filesizeEqual(filesizes) && identicalSizeCount < 10) {
+					filesizes = getFileSizes(sourcePath, sourceFilename, destinationPath, destinationFilename);
+					previousSize = filesizes[1];
+					if (previousSize == filesizes[1]) {
+						identicalSizeCount++;
+					}
+					else {
+						identicalSizeCount = 0;
+					}
+					//Sleep here
+					count++;
+					lock.wait(1000);
+				}
+
+			}
 			if (!this.filesizeEqual(sourcePath, sourceFilename, destinationPath, destinationFilename)) {
 				response.setMessage("Files weren't of the same size. Transfer failed.");
+				if (identicalSizeCount > 10) response.setMessage(String.format("%s\n%s", response.getMessage(), "File size didn't increase for 10 seconds."));
 				response.setStatus(STATUS_NOK);
 			} else {
 				if (move) {
 					this.deleteFile(sourcePath, sourceFilename);
 				}
+				response.setStatus(FileTransporter.STATUS_OK);
+				response.setMessage("The file " + sourceFilename + " has been copied as file " + destinationFilename + " on the destination " + this.destinationHost  );
 			}
 
-			response.setStatus(FileTransporter.STATUS_OK);
-			response.setMessage("The file " + sourceFilename + " has been copied as file " + destinationFilename + " on the destination " + this.destinationHost  );
 		}catch(IOException e){
 			e.printStackTrace();
 			response.setStatus(FileTransporter.STATUS_NOK);
@@ -459,6 +484,19 @@ public class FileTransporter {
 	}
 
 	private boolean filesizeEqual(String sourcePath, String sourceFilename, String destinationPath, String destinationFilename) throws IOException {
+		long[] sizes = getFileSizes(sourcePath, sourceFilename, destinationPath, destinationFilename);
+		return filesizeEqual(sizes);
+	}
+
+	private boolean filesizeEqual(long[] sizes) {
+		if (sizes[0] != sizes[1]) {
+			return false;
+		}
+		return true;
+	}
+
+	private long[] getFileSizes(String sourcePath, String sourceFilename, String destinationPath, String destinationFilename) throws IOException {
+		long[] sizes = new long[2];
 		FTPClient ftpClient1 = new FTPClient();
 		FTPClient ftpClient2 = new FTPClient();
 		try{
@@ -480,9 +518,11 @@ public class FileTransporter {
 				throw new IOException("Transfer failed. One of the files doesn't exist anymore.");
 
 			}else{
-				if (files1[0].getSize() == files2[0].getSize()) return true;
+				System.out.printf("Transfer status: %d/%d\n", files2[0].getSize(), files1[0].getSize());
+				sizes[0] = files1[0].getSize();
+				sizes[1] = files2[0].getSize();
 			}
-			return false;
+			return sizes;
 
 		}finally{
 			ftpClient1.disconnect();
@@ -499,7 +539,38 @@ public class FileTransporter {
 	}
 
 	private static void ftpCreateDirectoryTree( FTPClient client, String dirTree ) throws IOException {
+		String tempTree = dirTree;
 
+		while (!client.changeWorkingDirectory(tempTree)) {
+			tempTree = tempTree.substring(0, tempTree.lastIndexOf("/"));
+			System.out.println("Temptree: " + tempTree);
+		}
+
+		String toCreateDirs = dirTree.replaceFirst(tempTree, "");
+
+		System.out.println("To create directories: " + toCreateDirs);
+
+		String[] directories = toCreateDirs.split("/");
+		boolean dirExists = true;
+		for (String dir : directories ) {
+			if (dir != null && !dir.isEmpty()) {
+				if (!dir.isEmpty()) {
+					if (dirExists) {
+						dirExists = client.changeWorkingDirectory(dir);
+					}
+					if (!dirExists) {
+						if (!client.makeDirectory(dir)) {
+							throw new IOException("Unable to create remote directory '" + dir + "'.  error='" + client.getReplyString() + "'");
+						}
+						if (!client.changeWorkingDirectory(dir)) {
+							throw new IOException("Unable to change into newly created remote directory '" + dir + "'.  error='" + client.getReplyString() + "'");
+						}
+					}
+				}
+			}
+		}
+
+		/*
 		boolean dirExists = true;
 
 		//tokenize the string and attempt to change into each directory level.  If you cannot, then start creating.
@@ -521,5 +592,6 @@ public class FileTransporter {
 				}
 			}
 		}
+	*/
 	}
 }
