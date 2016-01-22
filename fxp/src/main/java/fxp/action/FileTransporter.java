@@ -282,13 +282,14 @@ public class FileTransporter {
 
 				while (!filesizeEqual(filesizes) && identicalSizeCount < 10) {
 					filesizes = getFileSizes(sourcePath, sourceFilename, destinationPath, destinationFilename);
-					previousSize = filesizes[1];
+
 					if (previousSize == filesizes[1]) {
 						identicalSizeCount++;
 					}
 					else {
 						identicalSizeCount = 0;
 					}
+					previousSize = filesizes[1];
 					//Sleep here
 					count++;
 					lock.wait(1000);
