@@ -5,12 +5,17 @@ package fxp.action;
 import java.io.IOException;
 import java.net.SocketException;
 
+import fxp.runnables.TransportRunnable;
 import org.apache.commons.net.ftp.FTPClient;
 import org.apache.commons.net.ftp.FTPFile;
 
 
 import fxp.response.FXPResponse;
 import fxp.thread.StorProcedure;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import javax.naming.AuthenticationException;
 
 /*
  * @author:Bart Devis
@@ -21,16 +26,16 @@ import fxp.thread.StorProcedure;
  */
 
 public class FileTransporter {
+	private static final Logger logger = LogManager.getLogger(FileTransporter.class);
 
-
-	private String sourceHost;
-	private String destinationHost;
-	private String sourceUser;
-	private String destinationUser;
-	private int sourcePort = 21;
-	private int destinationPort = 21;
-	private String sourcePassword;
-	private String destinationPassword;
+	public String sourceHost;
+	public String destinationHost;
+	public String sourceUser;
+	public String destinationUser;
+	public int sourcePort = 21;
+	public int destinationPort = 21;
+	public String sourcePassword;
+	public String destinationPassword;
 
 	public static final String STATUS_NOK = "NOK";
 	public static final String STATUS_OK = "OK";
@@ -218,8 +223,8 @@ public class FileTransporter {
 	@return boolean true= file is copied, false=file is not copied 
 	@throws IOException - if the method can not do a command on the servers*/
 	public FXPResponse transport(String sourcePath,String sourceFilename,String destinationPath,String destinationFilename,boolean move){
-
 		FXPResponse response = new FXPResponse();
+
 		response.setId(this.getId(destinationFilename));
 		response.setActie(FileTransporter.ACTIE);
 		this.checkData(response);
@@ -228,112 +233,17 @@ public class FileTransporter {
 			return response;
 		}
 
-		FTPClient ftp1 = new FTPClient();
-		FTPClient ftp2 = new FTPClient();
+		Runnable r = new TransportRunnable(sourcePath, sourceFilename, destinationPath, destinationFilename, move, this);
+		new Thread(r).start();
 
-		try{
-			this.doFileCheck(sourcePath, sourceFilename,response);
-			if(response.getStatus() == FileTransporter.STATUS_NOK){
-				return response;
+		response.setStatus(STATUS_OK);
+		response.setMessage("File is being transferred");
 
-			}
-			ftp1.connect(this.destinationHost, this.destinationPort);
-			ftp2.connect(this.sourceHost, this.sourcePort);
-
-			if(!ftp1.login(this.destinationUser, this.destinationPassword)){
-				System.out.println("ftp1 login false");
-			}
-			if(!ftp2.login(this.sourceUser, this.sourcePassword)){
-				System.out.println("ftp2 login false");
-			}
-
-			ftpCreateDirectoryTree(ftp1, destinationPath);
-			ftpCreateDirectoryTree(ftp2, sourcePath);
-
-			/*
-			ftp1.changeWorkingDirectory(destinationPath);
-			ftp2.changeWorkingDirectory(sourcePath);
-			*/
-			ftp1.sendCommand("TYPE I");
-			ftp2.sendCommand("TYPE I");
-			ftp1.sendCommand("PASV");
-
-			String reply = ftp1.getReplyString();;
-			ftp2.sendCommand("PORT " + this.getPorts(reply));
-
-			StorProcedure storPro = new StorProcedure(ftp1, "STOR " + destinationFilename);
-			StorProcedure retrProdecure = new StorProcedure(ftp2, "RETR " + sourceFilename);
-
-			Thread thread = new Thread(storPro);
-			Thread thread2 = new Thread(retrProdecure);
-
-			thread.start();
-			thread2.start();
-
-			thread.join();
-			thread2.join();
-
-
-			int count = 0;
-			long previousSize = 0;
-			int identicalSizeCount = 0;
-			synchronized (lock) {
-				long[] filesizes = getFileSizes(sourcePath, sourceFilename, destinationPath, destinationFilename);
-
-				while (!filesizeEqual(filesizes) && identicalSizeCount < 10) {
-					filesizes = getFileSizes(sourcePath, sourceFilename, destinationPath, destinationFilename);
-
-					if (previousSize == filesizes[1]) {
-						identicalSizeCount++;
-					}
-					else {
-						identicalSizeCount = 0;
-					}
-					previousSize = filesizes[1];
-					//Sleep here
-					count++;
-					lock.wait(1000);
-				}
-
-			}
-			if (!this.filesizeEqual(sourcePath, sourceFilename, destinationPath, destinationFilename)) {
-				response.setMessage("Files weren't of the same size. Transfer failed.");
-				if (identicalSizeCount > 10) response.setMessage(String.format("%s\n%s", response.getMessage(), "File size didn't increase for 10 seconds."));
-				response.setStatus(STATUS_NOK);
-			} else {
-				if (move) {
-					this.deleteFile(sourcePath, sourceFilename);
-				}
-				response.setStatus(FileTransporter.STATUS_OK);
-				response.setMessage("The file " + sourceFilename + " has been copied as file " + destinationFilename + " on the destination " + this.destinationHost  );
-			}
-
-		}catch(IOException e){
-			e.printStackTrace();
-			response.setStatus(FileTransporter.STATUS_NOK);
-			response.setMessage("There was an error within an IO-action: " + e.getMessage() + ". INFO SOURCE Filename: " + sourceFilename + ". FilePath: " + sourcePath);
-		} catch (Exception e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-			response.setStatus(FileTransporter.STATUS_NOK);
-			response.setMessage("There was an error within an IO-action: " + e.getMessage() + ". INFO SOURCE Filename: " + sourceFilename + ". FilePath: " + sourcePath);
-		}finally{
-			try {
-				ftp1.disconnect();
-				ftp2.disconnect();
-			} catch (IOException e) {
-				e.printStackTrace();
-				response.setStatus(FileTransporter.STATUS_NOK);
-				response.setMessage("There was an error when closing de ftp-connection : " + e.getMessage() + ". INFO SOURCE Filename: " + sourceFilename + ". FilePath: " + sourcePath);
-
-			}
-
-		}
 		return response;
 	}
 
 	public FXPResponse moveFile(String sourcePath, String sourceFilename, String destinationPath, String destinationFilename) {
-
+		logger.info("Request for moving a file received");
 		FXPResponse response = new FXPResponse();
 		response.setId(this.getId(destinationFilename));
 		response.setActie(FileTransporter.MOV_ACTIE);
@@ -352,9 +262,11 @@ public class FileTransporter {
 
 			}
 			ftp1.connect(this.destinationHost, this.destinationPort);
+			logger.info("Connected to FTP server");
 
 			if(!ftp1.login(this.destinationUser, this.destinationPassword)){
-				System.out.println("ftp1 login false");
+				logger.error("ftp login false");
+				throw new AuthenticationException("FTP login was incorrect");
 			}
 
 			//ftp1.changeWorkingDirectory(destinationPath);
@@ -374,12 +286,16 @@ public class FileTransporter {
 			thread.start();
 			thread2.start();
 
+			logger.info("File move requested");
+
 			thread.join();
 			thread2.join();
 
 			response.setStatus(FileTransporter.STATUS_OK);
 			response.setMessage("The file " + sourceFilename + " has been moved as file " + destinationFilename + " on the destination " + this.destinationHost  );
+			logger.info("The file " + sourceFilename + " has been moved as file " + destinationFilename + " on the destination " + this.destinationHost);
 		}catch(IOException e){
+			logger.error("IOException occurred");
 			e.printStackTrace();
 			response.setStatus(FileTransporter.STATUS_NOK);
 			response.setMessage("There was an error within an IO-action: " + e.getMessage() + ". INFO SOURCE Filename: " + sourceFilename + ". FilePath: " + sourcePath);
@@ -389,13 +305,45 @@ public class FileTransporter {
 		}finally{
 			try {
 				ftp1.disconnect();
+				logger.info("Disconnected");
 			} catch (IOException e) {
 				e.printStackTrace();
 				response.setStatus(FileTransporter.STATUS_NOK);
-				response.setMessage("There was an error when closing de ftp-connection : " + e.getMessage() + ". INFO SOURCE Filename: " + sourceFilename + ". FilePath: " + sourcePath);
+				response.setMessage("There was an error when closing the ftp-connection : " + e.getMessage() + ". INFO SOURCE Filename: " + sourceFilename + ". FilePath: " + sourcePath);
+				logger.error("There was an error when closing the ftp-connection : " + e.getMessage() + ". INFO SOURCE Filename: " + sourceFilename + ". FilePath: " + sourcePath);
 
 			}
 
+		}
+		return response;
+	}
+
+	public FXPResponse deleteFile(String sourcePath, String sourceFilename) throws SocketException, IOException {
+		FTPClient ftpClient = new FTPClient();
+		FXPResponse response = new FXPResponse();
+		try{
+
+			ftpClient.connect(this.sourceHost, this.destinationPort);
+			ftpClient.login(this.sourceUser, this.sourcePassword);
+
+			ftpClient.changeWorkingDirectory(sourcePath);
+			FTPFile[] files = ftpClient.listFiles(sourceFilename);
+
+			if (files.length == 0){
+				response.setStatus(FileTransporter.STATUS_NOK);
+				response.setMessage("File does not exist");
+
+			}
+			else {
+				ftpClient.deleteFile(sourceFilename);
+				response.setStatus(FileTransporter.STATUS_OK);
+				response.setMessage(sourcePath + "/" + sourceFilename + " has been deleted");
+			}
+
+
+
+		}finally{
+			ftpClient.disconnect();
 		}
 		return response;
 	}
@@ -424,7 +372,7 @@ public class FileTransporter {
 
 	}
 
-	private void doFileCheck(String sourcePath,String sourceFilename, FXPResponse response) throws SocketException, IOException{
+	public void doFileCheck(String sourcePath, String sourceFilename, FXPResponse response) throws SocketException, IOException{
 
 		FTPClient ftpClient = new FTPClient();
 		try{
@@ -450,6 +398,87 @@ public class FileTransporter {
 
 	}
 
+
+	private String getId(String sourceFile){
+		int location = sourceFile.indexOf(".");
+		return sourceFile.substring(0, (location == -1 ? sourceFile.length() - 1 : location));
+	}
+
+	public String getPorts(String reply){
+		int location = reply.indexOf('(');
+		int location2 = reply.indexOf(')');
+		return reply.substring(location+1, location2);
+	}
+
+	public boolean filesizeEqual(String sourcePath, String sourceFilename, String destinationPath, String destinationFilename) throws IOException {
+		long[] sizes = getFileSizes(sourcePath, sourceFilename, destinationPath, destinationFilename);
+		return filesizeEqual(sizes);
+	}
+
+	public boolean filesizeEqual(long sourceSize, String destinationPath, String destinationFilename) throws IOException {
+		long size = getFileSize(destinationPath, destinationFilename);
+		long[] sizes = {sourceSize, size};
+		return filesizeEqual(sizes);
+	}
+
+	public long getFileSize(String destinationPath, String destinationFilename) throws IOException {
+		FTPClient ftpClient1 = new FTPClient();
+		try {
+			ftpClient1.connect(this.destinationHost, this.destinationPort);
+			ftpClient1.login(this.destinationUser, this.destinationPassword);
+			ftpClient1.changeWorkingDirectory(destinationPath);
+			FTPFile[] files1 = ftpClient1.listFiles(destinationFilename);
+			if (files1.length == 0) {
+				throw new IOException("File size check failed, file doesn't exist anymore.");
+			} else {
+				return files1[0].getSize();
+			}
+		} finally {
+			ftpClient1.disconnect();
+		}
+	}
+
+	public boolean filesizeEqual(long[] sizes) {
+		if (sizes[0] != sizes[1]) {
+			return false;
+		}
+		return true;
+	}
+
+	public long[] getFileSizes(String sourcePath, String sourceFilename, String destinationPath, String destinationFilename) throws IOException {
+		long[] sizes = new long[2];
+		FTPClient ftpClient1 = new FTPClient();
+		FTPClient ftpClient2 = new FTPClient();
+		try{
+
+			ftpClient1.connect(this.sourceHost, this.sourcePort);
+			ftpClient2.connect(this.destinationHost, this.destinationPort);
+
+			ftpClient1.login(this.sourceUser, this.sourcePassword);
+			ftpClient2.login(this.destinationUser, this.destinationPassword);
+
+			ftpClient1.changeWorkingDirectory(sourcePath);
+			ftpClient2.changeWorkingDirectory(destinationPath);
+
+
+			FTPFile[] files1 = ftpClient1.listFiles(sourceFilename);
+			FTPFile[] files2 = ftpClient2.listFiles(destinationFilename);
+
+			if (files1.length == 0 || files2.length == 0){
+				throw new IOException("Transfer failed. One of the files doesn't exist anymore.");
+
+			}else{
+				sizes[0] = files1[0].getSize();
+				sizes[1] = files2[0].getSize();
+			}
+			return sizes;
+
+		}finally{
+			ftpClient1.disconnect();
+			ftpClient2.disconnect();
+		}
+	}
+
 	public boolean checkFreeSpace(String destinationPath, int maxFilesOnLocation) throws SocketException, IOException{
 
 		FTPClient ftpClient = new FTPClient();
@@ -473,83 +502,38 @@ public class FileTransporter {
 		return result;
 	}
 
-	private String getId(String sourceFile){
-		int location = sourceFile.indexOf(".");
-		return sourceFile.substring(0, (location == -1 ? sourceFile.length() - 1 : location));
-	}
+	public void renameFile(String destinationPath, String destinationFileName, String originalDestinationFileName) throws SocketException, IOException{
 
-	private String getPorts(String reply){
-		int location = reply.indexOf('(');
-		int location2 = reply.indexOf(')');
-		return reply.substring(location+1, location2);
-	}
-
-	private boolean filesizeEqual(String sourcePath, String sourceFilename, String destinationPath, String destinationFilename) throws IOException {
-		long[] sizes = getFileSizes(sourcePath, sourceFilename, destinationPath, destinationFilename);
-		return filesizeEqual(sizes);
-	}
-
-	private boolean filesizeEqual(long[] sizes) {
-		if (sizes[0] != sizes[1]) {
-			return false;
-		}
-		return true;
-	}
-
-	private long[] getFileSizes(String sourcePath, String sourceFilename, String destinationPath, String destinationFilename) throws IOException {
-		long[] sizes = new long[2];
-		FTPClient ftpClient1 = new FTPClient();
-		FTPClient ftpClient2 = new FTPClient();
+		FTPClient ftpClient = new FTPClient();
+		boolean result = false;
 		try{
 
-			ftpClient1.connect(this.sourceHost, this.sourcePort);
-			ftpClient2.connect(this.destinationHost, this.destinationPort);
+			ftpClient.connect(this.destinationHost, this.destinationPort);
+			ftpClient.login(this.destinationUser, this.destinationPassword);
 
-			ftpClient1.login(this.sourceUser, this.sourcePassword);
-			ftpClient2.login(this.destinationUser, this.destinationPassword);
+			ftpClient.changeWorkingDirectory(destinationPath);
+			FTPFile[] files = ftpClient.listFiles();
 
-			ftpClient1.changeWorkingDirectory(sourcePath);
-			ftpClient2.changeWorkingDirectory(destinationPath);
-
-
-			FTPFile[] files1 = ftpClient1.listFiles(sourceFilename);
-			FTPFile[] files2 = ftpClient2.listFiles(destinationFilename);
-
-			if (files1.length == 0 || files2.length == 0){
-				throw new IOException("Transfer failed. One of the files doesn't exist anymore.");
-
-			}else{
-				System.out.printf("Transfer status: %d/%d\n", files2[0].getSize(), files1[0].getSize());
-				sizes[0] = files1[0].getSize();
-				sizes[1] = files2[0].getSize();
-			}
-			return sizes;
-
+			ftpClient.rename(destinationFileName, originalDestinationFileName);
 		}finally{
-			ftpClient1.disconnect();
-			ftpClient2.disconnect();
+			ftpClient.disconnect();
 		}
 	}
 
-	private void deleteFile(String sourcePath, String sourceFilename) throws IOException {
-		FTPClient ftpClient = new FTPClient();
-		ftpClient.connect(this.sourceHost, this.sourcePort);
-		ftpClient.login(this.sourceUser, this.sourcePassword);
-		ftpClient.changeWorkingDirectory(sourcePath);
-		ftpClient.deleteFile(sourceFilename);
-	}
 
-	private static void ftpCreateDirectoryTree( FTPClient client, String dirTree ) throws IOException {
-		String tempTree = dirTree;
+	public static void ftpCreateDirectoryTree(FTPClient client, String dirTree) throws IOException {
+
+
+		String tempTree = dirTree; // /vrt/temp
 
 		while (!client.changeWorkingDirectory(tempTree)) {
-			tempTree = tempTree.substring(0, tempTree.lastIndexOf("/"));
-			System.out.println("Temptree: " + tempTree);
+			tempTree = tempTree.substring(0, tempTree.lastIndexOf("/"));// /vrt
+			logger.info("Temptree: " + tempTree);
 		}
 
 		String toCreateDirs = dirTree.replaceFirst(tempTree, "");
 
-		System.out.println("To create directories: " + toCreateDirs);
+		if (!toCreateDirs.equals("")) logger.info("To create directories: " + toCreateDirs);
 
 		String[] directories = toCreateDirs.split("/");
 		boolean dirExists = true;
@@ -570,29 +554,5 @@ public class FileTransporter {
 				}
 			}
 		}
-
-		/*
-		boolean dirExists = true;
-
-		//tokenize the string and attempt to change into each directory level.  If you cannot, then start creating.
-		String[] directories = dirTree.replaceFirst(client.printWorkingDirectory(), "").split("/");
-		for (String dir : directories ) {
-			if (dir != null && !dir.isEmpty()) {
-				if (!dir.isEmpty()) {
-					if (dirExists) {
-						dirExists = client.changeWorkingDirectory(dir);
-					}
-					if (!dirExists) {
-						if (!client.makeDirectory(dir)) {
-							throw new IOException("Unable to create remote directory '" + dir + "'.  error='" + client.getReplyString() + "'");
-						}
-						if (!client.changeWorkingDirectory(dir)) {
-							throw new IOException("Unable to change into newly created remote directory '" + dir + "'.  error='" + client.getReplyString() + "'");
-						}
-					}
-				}
-			}
-		}
-	*/
 	}
 }
