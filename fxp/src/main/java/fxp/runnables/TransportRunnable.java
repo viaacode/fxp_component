@@ -2,6 +2,7 @@ package fxp.runnables;
 
 import fxp.action.FileTransporter;
 import fxp.response.FXPResponse;
+import fxp.thread.IThreadManager;
 import fxp.thread.StorProcedure;
 import org.apache.commons.net.ftp.FTPClient;
 import org.apache.commons.net.ftp.FTPFile;
@@ -19,10 +20,6 @@ import javax.naming.AuthenticationException;
 /**
  * Created by dieter on 02/02/2016.
  */
-
-
-
-
 public class TransportRunnable implements Runnable {
     private static final Logger logger = LogManager.getLogger(TransportRunnable.class);
     private String sourcePath;
@@ -31,19 +28,21 @@ public class TransportRunnable implements Runnable {
     private String destinationFilename;
     private boolean move;
     private FileTransporter transporter;
+    private IThreadManager observer;
 
 
     private static final class Lock { }
     private final Object lock = new Lock();
 
 
-    public TransportRunnable(String sourcePath, String sourceFilename, String destinationPath, String destinationFilename, boolean move, FileTransporter transporter) {
+    public TransportRunnable(String sourcePath, String sourceFilename, String destinationPath, String destinationFilename, boolean move, FileTransporter transporter, IThreadManager observer) {
         this.sourcePath = sourcePath;
         this.sourceFilename = sourceFilename;
         this.destinationPath = destinationPath;
         this.destinationFilename = destinationFilename;
         this.move = move;
         this.transporter = transporter;
+        this.observer = observer;
     }
 
     @Override
@@ -60,7 +59,7 @@ public class TransportRunnable implements Runnable {
         FTPClient ftp2 = new FTPClient();
 
         try{
-            transporter.doFileCheck(sourcePath, sourceFilename,response);
+            transporter.doFileCheck(sourcePath, sourceFilename, response);
             if(response.getStatus() == FileTransporter.STATUS_NOK){
                 return;
 
@@ -91,7 +90,7 @@ public class TransportRunnable implements Runnable {
             ftp2.sendCommand("TYPE I");
             ftp1.sendCommand("PASV");
 
-            String reply = ftp1.getReplyString();;
+            String reply = ftp1.getReplyString();
             ftp2.sendCommand("PORT " + transporter.getPorts(reply));
 
             StorProcedure storPro = new StorProcedure(ftp1, "STOR " + destinationFilename);
@@ -115,6 +114,7 @@ public class TransportRunnable implements Runnable {
                 long sourcefilesize = filesizes[0];
 
                 while (!transporter.filesizeEqual(filesizes) && identicalSizeCount < 10) {
+                    lock.wait(30000);
                     try {
                         filesizes[1] = transporter.getFileSize(destinationPath, destinationFilename);
                     } catch (IOException e) {
@@ -131,9 +131,8 @@ public class TransportRunnable implements Runnable {
                     previousSize = filesizes[1];
                     //Sleep here
                     count++;
-                    lock.wait(5000);
-                }
 
+                }
             }
             if (!transporter.filesizeEqual(sourcePath, sourceFilename, destinationPath, destinationFilename)) {
                 logger.error("Files weren't of the same size, transfer failed. Files:");
@@ -143,6 +142,7 @@ public class TransportRunnable implements Runnable {
                 response.setStatus(transporter.STATUS_NOK);
             } else {
                 transporter.renameFile(destinationPath, destinationFilename, originalDestinationFileName);
+                logger.info("Renamed file from " + destinationFilename + " to " + originalDestinationFileName);
                 if (move) {
                     transporter.deleteFile(sourcePath, sourceFilename);
                     logger.info("Deleted file @ " + sourcePath + "/" + sourceFilename);
@@ -164,6 +164,7 @@ public class TransportRunnable implements Runnable {
             e.printStackTrace();
         } finally{
             try {
+                observer.notifyFinish(this);
                 ftp1.disconnect();
                 ftp2.disconnect();
             } catch (IOException e) {
@@ -175,6 +176,6 @@ public class TransportRunnable implements Runnable {
 
         }
 
-        System.out.println("##################################################################     TRANSFER DONE!!!     ##################################################################");
+        logger.info("TRANSFER DONE");
     }
 }

@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.net.SocketException;
 
 import fxp.runnables.TransportRunnable;
+import fxp.thread.IThreadManager;
 import org.apache.commons.net.ftp.FTPClient;
 import org.apache.commons.net.ftp.FTPFile;
 
@@ -44,6 +45,7 @@ public class FileTransporter {
 
 	private static final class Lock { }
 	private final Object lock = new Lock();
+	private IThreadManager manager;
 
 
 	/*
@@ -66,7 +68,7 @@ public class FileTransporter {
 
 	public FileTransporter(String sourceHost, String destinationHost,
 						   String sourceUser, String destinationUser, String sourcePassword,
-						   String destinationPassword) {
+						   String destinationPassword, IThreadManager manager) {
 		super();
 		this.sourceHost = sourceHost;
 		this.destinationHost = destinationHost;
@@ -74,7 +76,7 @@ public class FileTransporter {
 		this.destinationUser = destinationUser;
 		this.sourcePassword = sourcePassword;
 		this.destinationPassword = destinationPassword;
-
+		this.manager = manager;
 
 	}
 
@@ -233,8 +235,8 @@ public class FileTransporter {
 			return response;
 		}
 
-		Runnable r = new TransportRunnable(sourcePath, sourceFilename, destinationPath, destinationFilename, move, this);
-		new Thread(r).start();
+		Runnable r = new TransportRunnable(sourcePath, sourceFilename, destinationPath, destinationFilename, move, this, manager);
+		manager.runThread(r);
 
 		response.setStatus(STATUS_OK);
 		response.setMessage("File is being transferred");
