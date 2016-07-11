@@ -10,3 +10,4 @@ fxp/target/maven-archiver/pom.properties
 *.jar
 
 fxp/target/fxp-1.0.1.jar
+/fxp/target/
